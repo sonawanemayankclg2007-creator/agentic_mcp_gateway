@@ -2,7 +2,7 @@ import React, { useState, useContext, useEffect, useRef, useLayoutEffect } from 
 import { createPortal } from 'react-dom'
 import { Play, ChevronDown, Zap, X, Timer } from 'lucide-react'
 import { AppContext } from '../App.jsx'
-import { mockRunAgent, mockStreamExecution } from '../services/api.js'
+import { runAgent, streamExecution } from '../services/api.js'
 import { MODULE_KEYS, getModuleIO } from '../config/moduleIO.js'
 
 const MAX_LEN = 2000
@@ -135,7 +135,7 @@ export default function ChatBox() {
     appendLog({ status: 'running', step: 'Planning workflow', detail: 'Claude is generating the DAG…' })
 
     try {
-      const { workflowId, nodes, edges } = await mockRunAgent({ input, module: currentModule })
+      const { workflowId, nodes, edges } = await runAgent({ input, module: currentModule })
 
       setAgentState((prev) => ({
         ...prev,
@@ -146,7 +146,7 @@ export default function ChatBox() {
 
       appendLog({ status: 'done', step: 'DAG generated', detail: `${nodes.length} steps planned` })
 
-      for await (const event of mockStreamExecution(nodes, {
+      for await (const event of streamExecution(workflowId, nodes, {
         module: currentModule,
         inputText: input.trim(),
       })) {
@@ -156,6 +156,9 @@ export default function ChatBox() {
         } else if (event.type === 'step_done') {
           updateDagNode(event.node_id, 'done')
           appendLog({ status: 'done', step: event.step, detail: event.detail })
+        } else if (event.type === 'step_failed') {
+          updateDagNode(event.node_id, 'failed')
+          appendLog({ status: 'failed', step: event.step, detail: event.detail })
         } else if (event.type === 'done') {
           appendLog({ status: 'done', step: '✓ All steps complete', detail: event.summary })
           setAgentState((prev) => ({

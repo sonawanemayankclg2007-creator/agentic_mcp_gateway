@@ -1,21 +1,49 @@
 import axios from 'axios'
 
-const BASE = '/api'
+/** Dev: `/api` → Vite proxy to FastAPI. Prod: set `VITE_API_BASE_URL` to backend origin (no trailing `/api`). */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
 const client = axios.create({
-  baseURL: BASE,
+  baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 30000,
+  timeout: 120000,
 })
+
+const MODULE_TO_BACKEND = {
+  DevOps: 'devops',
+  FinOps: 'finops',
+  Pricing: 'pricing',
+  Talent: 'talent',
+  'Supply Chain': 'supply_chain',
+  GeoSpatial: 'geospatial',
+}
+
+export function toBackendModule(displayName) {
+  const m = MODULE_TO_BACKEND[displayName]
+  if (!m) throw new Error(`Unknown module: ${displayName}`)
+  return m
+}
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
 /**
- * Start agent run. Returns { workflow_id }
+ * Start agent run against FastAPI.
+ * `module` is the UI display name (e.g. "DevOps"); it is mapped to backend keys (e.g. devops).
+ * Returns { workflowId, nodes, edges } in the shape the canvas already expects.
  */
 export async function runAgent({ input, module }) {
-  const { data } = await client.post('/agent/run', { input, module })
-  return data
+  const backendModule = toBackendModule(module)
+  try {
+    const { data } = await client.post('/agent/run', { input, module: backendModule })
+    return {
+      workflowId: data.session_id,
+      nodes: data.dag?.nodes ?? [],
+      edges: data.dag?.edges ?? [],
+    }
+  } catch (err) {
+    const msg = formatAxiosError(err)
+    throw new Error(msg)
+  }
 }
 
 /**
@@ -29,8 +57,8 @@ export async function getWorkflow(id) {
 /**
  * Send approve / reject decision for a paused step
  */
-export async function sendApproval(id, approved) {
-  const { data } = await client.post(`/approval/${id}`, { approved })
+export async function sendApproval(sessionId, approved, stepId = '') {
+  const { data } = await client.post(`/approval/${sessionId}`, { approved, step_id: stepId })
   return data
 }
 
@@ -42,43 +70,98 @@ export async function getHealth() {
   return data
 }
 
-// ─── SSE Streaming ────────────────────────────────────────────────────────────
-
-/**
- * Open an SSE stream for a workflow.
- *
- * onEvent(event) is called for each streamed step.
- * Returns a cleanup function that closes the stream.
- *
- * Event shape: { type, node_id, step, status, detail, tool, payload }
- */
-export function streamExecution(workflowId, onEvent, onDone, onError) {
-  const url = `${BASE}/execution/stream?workflow_id=${workflowId}`
-  const es = new EventSource(url)
-
-  es.onmessage = (e) => {
-    try {
-      const event = JSON.parse(e.data)
-      if (event.type === 'done') {
-        onDone?.(event)
-        es.close()
-      } else {
-        onEvent(event)
-      }
-    } catch (err) {
-      console.error('SSE parse error', err)
-    }
-  }
-
-  es.onerror = (err) => {
-    onError?.(err)
-    es.close()
-  }
-
-  return () => es.close()
+function formatAxiosError(err) {
+  const d = err.response?.data
+  if (typeof d?.detail === 'string') return d.detail
+  if (Array.isArray(d?.detail)) return d.detail.map((x) => x.msg ?? JSON.stringify(x)).join(', ')
+  return err.message || 'Request failed'
 }
 
-// ─── Mock helpers (for dev without a backend) ─────────────────────────────────
+/** Map FastAPI executor SSE payloads to the same event types ChatBox already handles. */
+function normalizeExecutionEvent(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const { type, node_id: nodeId, step, detail } = raw
+  if (type === 'step_running') {
+    return { type: 'step_start', node_id: nodeId, step, status: 'running', detail }
+  }
+  if (type === 'step_done') {
+    return { type: 'step_done', node_id: nodeId, step, status: 'done', detail }
+  }
+  if (type === 'step_failed') {
+    return { type: 'step_failed', node_id: nodeId, step, status: 'failed', detail }
+  }
+  if (type === 'done') {
+    return raw
+  }
+  return null
+}
+
+async function* readSseJsonEvents(responseBody) {
+  const reader = responseBody.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let sep
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, sep)
+      buffer = buffer.slice(sep + 2)
+      for (const line of block.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trimStart()
+        if (!payload) continue
+        try {
+          yield JSON.parse(payload)
+        } catch {
+          /* ignore malformed chunk */
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Live execution stream (GET /execution/stream/{sessionId}).
+ * Yields the same shapes as mockStreamExecution so the UI needs no redesign.
+ */
+export async function* streamExecution(workflowId, nodes, options = {}) {
+  const { module = 'DevOps', inputText = '' } = options
+  const url = `${API_BASE}/execution/stream/${workflowId}`
+  let res
+  try {
+    res = await fetch(url)
+  } catch (e) {
+    throw new Error(e.message || 'Failed to open execution stream')
+  }
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const j = await res.json()
+      if (typeof j?.detail === 'string') detail = j.detail
+    } catch {
+      /* use statusText */
+    }
+    throw new Error(detail || `Stream failed (${res.status})`)
+  }
+  if (!res.body) throw new Error('No response body')
+
+  for await (const raw of readSseJsonEvents(res.body)) {
+    const ev = normalizeExecutionEvent(raw)
+    if (!ev) continue
+    if (ev.type === 'done' && !ev.output) {
+      yield {
+        ...ev,
+        output: mockBuildWorkflowOutput(module, inputText, nodes),
+      }
+    } else {
+      yield ev
+    }
+  }
+}
+
+// ─── Mock helpers (offline / tests) ───────────────────────────────────────────
 
 const MOCK_DELAY = (ms) => new Promise((r) => setTimeout(r, ms))
 
