@@ -23,15 +23,13 @@ for (const candidate of venvCandidates) {
   }
 }
 
-if (python === 'python' && !process.env.PYTHON) {
-  const hasVenv = fs.existsSync(path.join(backendRoot, '.venv'))
-  if (!hasVenv) {
-    console.error(
-      '[start-backend] No backend/.venv found. From the repo root:\n' +
-        '  cd backend && python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt\n' +
-        '  (macOS/Linux: use .venv/bin/pip instead)\n',
-    )
-  }
+const venvDir = path.join(backendRoot, '.venv')
+if (python === 'python' && !process.env.PYTHON && !fs.existsSync(venvDir)) {
+  console.error(
+    '[start-backend] No backend/.venv found. From the repo root:\n' +
+      '  cd backend && python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt\n' +
+      '  (macOS/Linux: use .venv/bin/pip instead)\n',
+  )
 }
 
 const args = ['-m', 'uvicorn', 'app.main:app', '--reload', '--host', '127.0.0.1', '--port', '8000']
