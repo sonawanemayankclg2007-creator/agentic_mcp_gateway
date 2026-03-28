@@ -1,0 +1,242 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    color: #f4f4f5;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: #08070f;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 10% -20%, rgba(139, 92, 246, 0.22), transparent 50%),
+      radial-gradient(ellipse 90% 60% at 100% 0%, rgba(59, 130, 246, 0.14), transparent 45%),
+      radial-gradient(ellipse 70% 50% at 50% 100%, rgba(52, 211, 153, 0.06), transparent 55%),
+      linear-gradient(180deg, #08070f 0%, #0c0a14 50%, #08070f 100%);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+    background-attachment: fixed;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(18, 16, 28, 0.6);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.55), rgba(91, 33, 182, 0.45));
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(167, 139, 250, 0.7), rgba(139, 92, 246, 0.6));
+  }
+}
+
+@layer components {
+  .app-shell-grid {
+    background-image:
+      linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 85% 70% at 50% 40%, black 20%, transparent 70%);
+  }
+
+  .glass-header {
+    @apply border-b border-white/[0.06];
+    background: linear-gradient(
+      180deg,
+      rgba(18, 16, 28, 0.92) 0%,
+      rgba(18, 16, 28, 0.72) 100%
+    );
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    box-shadow: 0 1px 0 rgba(139, 92, 246, 0.08);
+  }
+
+  .glass-sidebar {
+    background: linear-gradient(180deg, rgba(18, 16, 28, 0.55) 0%, rgba(12, 10, 20, 0.72) 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 24px rgba(139, 92, 246, 0.35);
+  }
+
+  .glow-success {
+    box-shadow: 0 0 16px rgba(52, 211, 153, 0.35);
+  }
+
+  .glow-error {
+    box-shadow: 0 0 16px rgba(248, 113, 113, 0.35);
+  }
+
+  .card {
+    @apply rounded-xl border border-border-dim bg-surface/80 backdrop-blur-sm;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease,
+      border-color 0.25s ease;
+  }
+
+  .card-interactive:hover {
+    @apply border-accent/30 shadow-glow-sm;
+    transform: translateY(-2px);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 rounded-xl font-semibold text-sm text-white
+      bg-gradient-to-r from-accent-deep via-accent to-indigo-500
+      hover:shadow-glow-sm hover:brightness-110 active:scale-[0.98]
+      transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:active:scale-100;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-2 rounded-xl text-sm text-text-muted
+      hover:text-text-primary hover:bg-white/[0.06] transition-all duration-200;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .node-pending {
+    @apply bg-surface-2 border-border-dim;
+  }
+
+  .node-running {
+    @apply bg-amber-950/35 border-warning;
+  }
+
+  .node-done {
+    @apply bg-emerald-950/35 border-success;
+  }
+
+  .node-failed {
+    @apply bg-red-950/35 border-error;
+  }
+
+  .logo-orbit {
+    animation: logoOrbit 10s linear infinite;
+  }
+
+  @keyframes logoOrbit {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/* React Flow overrides */
+.react-flow {
+  height: 100% !important;
+  min-height: 0 !important;
+  background: transparent !important;
+}
+
+.react-flow__viewport {
+  height: 100% !important;
+}
+
+.react-flow__renderer {
+  background: transparent !important;
+}
+
+.react-flow__pane {
+  background: transparent !important;
+}
+
+.react-flow__background {
+  background-color: transparent !important;
+}
+
+.react-flow__controls {
+  background: rgba(18, 16, 28, 0.92) !important;
+  border: 1px solid rgba(99, 102, 241, 0.22) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.12) !important;
+  fill: #c4b5fd !important;
+  transition: background 0.2s ease;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(139, 92, 246, 0.15) !important;
+}
+
+.react-flow__minimap {
+  background: rgba(18, 16, 28, 0.92) !important;
+  border: 1px solid rgba(99, 102, 241, 0.22) !important;
+  border-radius: 12px !important;
+}
+
+.react-flow__edge-path {
+  stroke: #8b5cf6;
+  stroke-width: 2;
+}
+
+.react-flow__edge.animated path {
+  stroke-dasharray: 5;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+/* Let OrbitControls receive drags: RF children use pointer-events: all by default. */
+.dag-reactflow-orbit.react-flow .react-flow__container {
+  pointer-events: none !important;
+}
+
+.dag-reactflow-orbit.react-flow .react-flow__pane,
+.dag-reactflow-orbit.react-flow .react-flow__node,
+.dag-reactflow-orbit.react-flow .react-flow__nodes,
+.dag-reactflow-orbit.react-flow .react-flow__edge,
+.dag-reactflow-orbit.react-flow .react-flow__edges,
+.dag-reactflow-orbit.react-flow .react-flow__edge-path,
+.dag-reactflow-orbit.react-flow .react-flow__viewport,
+.dag-reactflow-orbit.react-flow .react-flow__renderer {
+  pointer-events: none !important;
+}
+
+.dag-reactflow-orbit.react-flow .react-flow__controls,
+.dag-reactflow-orbit.react-flow .react-flow__minimap {
+  pointer-events: none !important;
+}
+
+.dag-reactflow-orbit.react-flow .react-flow__node-toolbar {
+  pointer-events: auto !important;
+}
+
+@keyframes dashdraw {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
