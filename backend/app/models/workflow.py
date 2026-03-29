@@ -1,7 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
- 
+
 class WorkflowStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -9,7 +9,7 @@ class WorkflowStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PARTIAL = "partial"
- 
+
 class TaskNode(BaseModel):
     id: str
     name: str
@@ -18,14 +18,12 @@ class TaskNode(BaseModel):
     params: dict = {}
     requires_approval: bool = False
     timeout_seconds: int = 30
- 
+
 class Edge(BaseModel):
-    from_: str
+    model_config = {"populate_by_name": True}
+    from_: str = Field(alias="from")
     to: str
- 
-    class Config:
-        fields = {"from_": "from"}
- 
+
 class WorkflowDAG(BaseModel):
     id: str
     name: str
