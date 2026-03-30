@@ -4,21 +4,24 @@ import ChatBox from '../components/ChatBox.jsx'
 import DAGView from '../components/DAGView.jsx'
 import ExecutionLog from '../components/ExecutionLog.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
+import ApprovalModal from '../components/ApprovalModal.jsx'
+import { submitApproval } from '../services/api.js'
 import {
-  GitBranch, DollarSign, Tag, Users, Package, MapPin,
+  GitBranch,
   Activity, Settings, ChevronRight, Wifi, WifiOff,
-  Zap, BarChart2, Clock, Shield, PanelLeftClose, PanelLeft,
-  Sparkles, Cpu, Move3d, Focus,
+  Zap,
+  BarChart2, Clock, Shield, PanelLeftClose, PanelLeft,
+  Sparkles, Cpu, Move3d, Focus, GraduationCap, Wand2,
 } from 'lucide-react'
 import { readGraphicsQuality, writeGraphicsQuality } from '../utils/graphicsQualityStorage.js'
 
 const MODULES = [
-  { id: 'DevOps', label: 'DevOps', icon: GitBranch, ps: 'PS6', color: '#8B5CF6', desc: 'Triage · Jira · Slack' },
-  { id: 'FinOps', label: 'FinOps', icon: DollarSign, ps: 'PS1', color: '#38BDF8', desc: 'Anomaly · Forecast' },
-  { id: 'Pricing', label: 'Pricing', icon: Tag, ps: 'PS3', color: '#FBBF24', desc: 'Dynamic · Sheets' },
-  { id: 'Talent', label: 'Talent', icon: Users, ps: 'PS9', color: '#F472B6', desc: 'Resume · Match' },
-  { id: 'Supply Chain', label: 'Supply Chain', icon: Package, ps: 'PS5', color: '#34D399', desc: 'Demand · Scenarios' },
-  { id: 'GeoSpatial', label: 'GeoSpatial', icon: MapPin, ps: 'PS7', color: '#F87171', desc: 'Location · Score' },
+  { id: 'DevOps', label: 'DevOps', icon: 'devops', ps: 'PS6', color: '#8B5CF6', desc: 'Triage · Jira · Slack' },
+  { id: 'FinOps', label: 'FinOps', icon: 'finops', ps: 'PS1', color: '#38BDF8', desc: 'Anomaly · Forecast' },
+  { id: 'Pricing', label: 'Pricing', icon: 'pricing', ps: 'PS3', color: '#FBBF24', desc: 'Dynamic · Sheets' },
+  { id: 'Talent', label: 'Talent', icon: 'talent', ps: 'PS9', color: '#F472B6', desc: 'Resume · Match' },
+  { id: 'Supply Chain', label: 'Supply Chain', icon: 'supply', ps: 'PS5', color: '#34D399', desc: 'Demand · Scenarios' },
+  { id: 'GeoSpatial', label: 'GeoSpatial', icon: 'geo', ps: 'PS7', color: '#F87171', desc: 'Location · Score' },
 ]
 
 const INTEGRATIONS = [
@@ -38,18 +41,20 @@ export default function Dashboard() {
       </div>
     )
   }
-  const { agentState, setAgentState, showToast, prefillChat } = ctx
+  const { agentState, setAgentState, showToast, prefillChat, openJudgeTour, orbitMode, setOrbitMode } = ctx
   const { currentModule, stats, running } = agentState
+  const mockMode = String(import.meta.env.VITE_USE_MOCK || '').toLowerCase() === 'true'
   const [recentRuns] = useState([
     { id: 'wf_001', module: 'DevOps', input: 'Login failed on mobile #142', time: '8s', status: 'done' },
     { id: 'wf_002', module: 'FinOps', input: 'AWS spend anomaly detected', time: '11s', status: 'done' },
     { id: 'wf_003', module: 'Talent', input: 'Senior React Engineer role', time: '14s', status: 'done' },
   ])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [autoHealFocusKey, setAutoHealFocusKey] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [reducedMotionSystem, setReducedMotionSystem] = useState(false)
   const [gfxQuality, setGfxQuality] = useState(() => readGraphicsQuality())
-  const [orbitMode, setOrbitMode] = useState(false)
+  const [approvalModal, setApprovalModal] = useState(null)
   const dagRef = useRef(null)
 
   const hasWorkflowGraph = agentState.dagNodes.length > 0
@@ -89,6 +94,37 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', onKey)
   }, [running, setModule, showToast, currentModule])
 
+  useEffect(() => {
+    if (agentState.lastEvent?.type !== 'approval_required') return
+    setApprovalModal({
+      action: agentState.lastEvent.action,
+      tool: agentState.lastEvent.tool,
+      description: agentState.lastEvent.description,
+      outcome: agentState.lastEvent.outcome,
+      sessionId: agentState.lastEvent.sessionId || agentState.workflowId,
+      stepId: agentState.lastEvent.stepId || '',
+    })
+  }, [agentState.lastEvent, agentState.workflowId])
+
+  const handleApproval = useCallback(
+    async (approved) => {
+      const payload = approvalModal
+      setApprovalModal(null)
+      if (!payload?.sessionId) return
+      if (mockMode) {
+        showToast(approved ? 'Approved action (mock)' : 'Rejected action (mock)', approved ? 'success' : 'warning')
+        return
+      }
+      try {
+        await submitApproval(payload.sessionId, approved, payload.stepId)
+        showToast(approved ? 'Approved action' : 'Rejected action', approved ? 'success' : 'warning')
+      } catch (err) {
+        showToast(err.message || 'Failed to submit approval', 'error')
+      }
+    },
+    [approvalModal, showToast, mockMode]
+  )
+
   const pingIntegration = (int) => {
     const ms = 28 + Math.round(Math.random() * 72)
     showToast(`${int.label} · ${ms}ms`, 'success')
@@ -110,6 +146,11 @@ export default function Dashboard() {
     }
   }
 
+  const openAutoHeal = () => {
+    setSettingsOpen(true)
+    setAutoHealFocusKey((v) => v + 1)
+  }
+
   return (
     <div className="relative flex flex-col h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 app-shell-grid z-0 opacity-[0.85]" aria-hidden />
@@ -126,9 +167,9 @@ export default function Dashboard() {
                 background: 'conic-gradient(from 0deg, transparent, rgba(139,92,246,0.45), transparent 40%)',
               }}
             />
-            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-accent-deep via-accent to-indigo-500 flex items-center justify-center shadow-glow-sm animate-glow-pulse group-hover/logo:scale-105 transition-transform duration-300">
-              <Zap size={18} fill="white" className="text-white" />
-            </div>
+              <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-accent-deep via-accent to-indigo-500 flex items-center justify-center shadow-glow-sm animate-glow-pulse group-hover/logo:scale-105 transition-transform duration-300">
+                <Zap size={18} fill="white" className="text-white" />
+              </div>
           </div>
           <div>
             <span className="font-bold text-lg text-text-primary tracking-tight">AVEOps</span>
@@ -160,6 +201,38 @@ export default function Dashboard() {
             onCopy={() => copyStat('Integrations', stats.integrations)}
           />
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button
+              type="button"
+              onClick={() => openJudgeTour?.()}
+              className="flex items-center gap-1.5 rounded-full border border-[#7C3AED]/45 bg-[#7C3AED]/15 px-3 py-1.5 text-[11px] font-bold tracking-wide text-[#DDD6FE]
+                backdrop-blur-sm shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#7C3AED]/25 hover:shadow-glow-sm active:scale-95"
+              title="Replay guided demo tour"
+            >
+              <GraduationCap size={13} className="text-[#C4B5FD]" />
+              Demo Tour
+            </button>
+            {currentModule === 'DevOps' && (
+              <button
+                type="button"
+                data-tour="auto-heal-entry"
+                onClick={openAutoHeal}
+                className="flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5 text-[11px] font-bold tracking-wide text-accent-light
+                  backdrop-blur-sm shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent/25 hover:shadow-glow-sm active:scale-95"
+                title="Open Auto-healing panel"
+              >
+                <Wand2 size={13} className="text-accent-light" />
+                Auto-Heal
+              </button>
+            )}
+            {mockMode && (
+              <span
+                className="inline-flex items-center gap-2 rounded-full border border-warning/30 bg-amber-950/25 px-3 py-1.5 text-[11px] font-bold tracking-wide text-warning"
+                title="Using mock agent + mock execution stream"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse" />
+                MOCK MODE
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setGfxQuality((q) => (q === 'high' ? 'low' : 'high'))}
@@ -240,6 +313,7 @@ export default function Dashboard() {
 
       <div className="relative z-[1] flex flex-1 overflow-hidden min-h-0">
         <aside
+          data-tour="sidebar-modules"
           className={`flex-shrink-0 flex flex-col border-r border-white/[0.06] glass-sidebar overflow-y-auto overflow-x-hidden transition-[width] duration-300 ease-out ${
             sidebarCollapsed ? 'w-[3.65rem]' : 'w-60'
           }`}
@@ -261,7 +335,6 @@ export default function Dashboard() {
               </p>
             )}
             {MODULES.map((mod, i) => {
-              const Icon = mod.icon
               const active = currentModule === mod.id
               return (
                 <button
@@ -271,22 +344,25 @@ export default function Dashboard() {
                   disabled={running}
                   title={`${mod.label} · ${mod.ps}`}
                   className={`
-                    w-full flex items-center gap-3 rounded-xl mb-1.5 text-left
+                    relative w-full flex items-center gap-3 rounded-xl mb-1.5 text-left
                     transition-all duration-300 ease-out group disabled:opacity-45 disabled:cursor-not-allowed
-                    animate-fade-in-up border
+                    animate-fade-in-up border border-l-2
                     ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'}
                     ${active
-                      ? 'bg-accent/18 border-accent/40 shadow-glow-sm -translate-y-0.5'
-                      : 'bg-white/[0.02] border-transparent hover:bg-white/[0.06] hover:border-white/[0.08] hover:-translate-y-0.5 hover:shadow-md'
+                      ? 'bg-accent/18 border-accent/40 shadow-glow-sm -translate-y-0.5 border-l-[#7C3AED]'
+                      : 'bg-white/[0.02] border-transparent border-l-transparent hover:bg-white/[0.06] hover:border-white/[0.08] hover:-translate-y-0.5 hover:shadow-md'
                     }`}
                   style={{ animationDelay: `${80 + i * 55}ms`, animationFillMode: 'backwards' }}
                 >
                   <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
-                    style={{ background: mod.color + '22', border: `1px solid ${mod.color}55` }}
+                    className="w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-105"
+                    style={{ background: mod.color + (active ? '33' : '22'), border: `1px solid ${mod.color}55`, opacity: active ? 1 : 0.7 }}
                   >
-                    <Icon size={14} style={{ color: mod.color }} />
+                    <ModuleIcon type={mod.icon} active={active} />
                   </div>
+                  <span className="pointer-events-none absolute left-[calc(100%+4px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border border-[#4C1D95] bg-[#1E1B2E] px-[10px] py-[6px] text-[12px] text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 z-[100]">
+                    {mod.label} · {mod.ps}
+                  </span>
                   {!sidebarCollapsed && (
                     <>
                       <div className="min-w-0 flex-1">
@@ -384,6 +460,7 @@ export default function Dashboard() {
           </div>
 
           <div
+            data-tour="workflow-canvas"
             className="flex-1 min-h-0 flex flex-col px-5 pb-3 animate-fade-in-up"
             style={{ animationDelay: '200ms', animationFillMode: 'backwards' }}
           >
@@ -402,7 +479,7 @@ export default function Dashboard() {
           </div>
         </main>
 
-        <aside className="w-72 flex-shrink-0 flex flex-col border-l border-white/[0.06] glass-sidebar overflow-hidden">
+        <aside data-tour="right-panel" className="w-72 flex-shrink-0 flex flex-col border-l border-white/[0.06] glass-sidebar overflow-hidden">
           <div
             className="flex-1 p-4 overflow-y-auto animate-fade-in-up"
             style={{ animationDelay: '160ms', animationFillMode: 'backwards' }}
@@ -417,6 +494,17 @@ export default function Dashboard() {
         onClose={() => setSettingsOpen(false)}
         onPingAll={pingAllIntegrations}
         reducedMotionSystem={reducedMotionSystem}
+        showToast={showToast}
+        focusAutoHealKey={autoHealFocusKey}
+      />
+      <ApprovalModal
+        isOpen={Boolean(approvalModal)}
+        action={approvalModal?.action}
+        tool={approvalModal?.tool}
+        description={approvalModal?.description}
+        outcome={approvalModal?.outcome}
+        onApprove={() => handleApproval(true)}
+        onReject={() => handleApproval(false)}
       />
     </div>
   )
@@ -456,5 +544,62 @@ function RecentRunChip({ run, delay = 0, onReplay }) {
       <span className="text-text-muted">{run.module}</span>
       <span className="text-text-muted font-mono">{run.time}</span>
     </button>
+  )
+}
+
+function ModuleIcon({ type, active }) {
+  const color = active ? '#FFFFFF' : '#A78BFA'
+  const common = { stroke: color, strokeWidth: 1.5, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' }
+
+  if (type === 'devops') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <circle cx="4" cy="4" r="2" {...common} />
+        <circle cx="14" cy="4" r="2" {...common} />
+        <circle cx="9" cy="14" r="2" {...common} />
+        <path d="M5.5 5.5L8.1 12M12.5 5.5L9.9 12M6 4H12" {...common} />
+      </svg>
+    )
+  }
+  if (type === 'finops') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <circle cx="9" cy="9" r="6.5" {...common} />
+        <path d="M10.8 6.5c0-.8-.7-1.4-1.8-1.4s-1.8.6-1.8 1.4c0 2.1 3.6 1.1 3.6 3.2 0 .9-.8 1.5-2 1.5-1.2 0-2-.6-2-1.5M9 4.3v8.4" {...common} />
+      </svg>
+    )
+  }
+  if (type === 'pricing') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <path d="M4.5 9.5l3.8-3.8 2.2 2.2 3-3" {...common} />
+        <path d="M11.5 4.9h2v2" {...common} />
+        <path d="M3.5 11.2l4.5 4.3 5.2-5-4.5-4.3z" {...common} />
+      </svg>
+    )
+  }
+  if (type === 'talent') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <circle cx="9" cy="6" r="2.5" {...common} />
+        <path d="M4.5 13.8c1.1-1.8 2.6-2.8 4.5-2.8s3.4 1 4.5 2.8" {...common} />
+      </svg>
+    )
+  }
+  if (type === 'supply') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <rect x="2.5" y="3" width="4" height="4" rx="0.8" {...common} />
+        <rect x="11.5" y="3" width="4" height="4" rx="0.8" {...common} />
+        <rect x="7" y="11" width="4" height="4" rx="0.8" {...common} />
+        <path d="M6.5 5h5M4.5 7.2v2.2l4.5 2.2M13.5 7.2v2.2L9 11.6" {...common} />
+      </svg>
+    )
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+      <path d="M9 15s4.5-3.9 4.5-7A4.5 4.5 0 1 0 4.5 8c0 3.1 4.5 7 4.5 7z" {...common} />
+      <circle cx="9" cy="8" r="1.5" {...common} />
+    </svg>
   )
 }

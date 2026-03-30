@@ -1,9 +1,19 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { X, Keyboard, Radio, Sparkles } from 'lucide-react'
+import AutoHealPanel from './AutoHealPanel.jsx'
 
 const MODULE_KEYS = ['1 · DevOps', '2 · FinOps', '3 · Pricing', '4 · Talent', '5 · Supply Chain', '6 · GeoSpatial']
 
-export default function SettingsPanel({ open, onClose, onPingAll, reducedMotionSystem }) {
+export default function SettingsPanel({ open, onClose, onPingAll, reducedMotionSystem, showToast, focusAutoHealKey }) {
+  const autoHealRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    if (!focusAutoHealKey) return
+    window.setTimeout(() => {
+      autoHealRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 40)
+  }, [open, focusAutoHealKey])
 
   if (!open) return null
 
@@ -55,6 +65,10 @@ export default function SettingsPanel({ open, onClose, onPingAll, reducedMotionS
               Simulates a health check and shows latency toasts for each connector.
             </p>
           </section>
+
+          <div ref={autoHealRef}>
+            <AutoHealPanel showToast={showToast} />
+          </div>
 
           <section>
             <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-text-muted mb-2">

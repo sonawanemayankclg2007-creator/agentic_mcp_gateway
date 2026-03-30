@@ -1,10 +1,16 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import Dashboard from './pages/Dashboard.jsx'
-import ApprovalModal from './components/ApprovalModal.jsx'
+import LoadingScreen from './components/LoadingScreen.jsx'
+import JudgeTour from './components/JudgeTour.jsx'
 
 export const AppContext = React.createContext(null)
 
 export default function App() {
+  const [isBooting, setIsBooting] = useState(true)
+  const [showTour, setShowTour] = useState(false)
+  const [shouldRenderLoadingScreen, setShouldRenderLoadingScreen] = useState(true)
+  const dismissLoadingScreenTimeoutRef = useRef(null)
+
   const [agentState, setAgentState] = useState({
     running: false,
     workflowId: null,
@@ -17,10 +23,29 @@ export default function App() {
     lastRunInput: '',
   })
 
-  const [approval, setApproval] = useState(null)
-
   const [toast, setToast] = useState(null)
   const [chatPrefill, setChatPrefill] = useState(null)
+  const [orbitMode, setOrbitMode] = useState(false)
+
+  const handleLoadingComplete = useCallback(() => {
+    setIsBooting(false)
+    if (dismissLoadingScreenTimeoutRef.current) window.clearTimeout(dismissLoadingScreenTimeoutRef.current)
+    dismissLoadingScreenTimeoutRef.current = window.setTimeout(() => {
+      setShouldRenderLoadingScreen(false)
+    }, 650) // keep mounted during the LoadingScreen 600ms fade-out
+  }, [])
+
+  useEffect(() => {
+    if (!isBooting) return
+    setShouldRenderLoadingScreen(true)
+    if (dismissLoadingScreenTimeoutRef.current) window.clearTimeout(dismissLoadingScreenTimeoutRef.current)
+  }, [isBooting])
+
+  useEffect(() => {
+    if (isBooting) return
+    const seen = window.localStorage.getItem('judge-tour-seen') === '1'
+    if (!seen) setShowTour(true)
+  }, [isBooting])
 
   const showToast = useCallback((message, tone = 'default') => {
     const id = Date.now()
@@ -54,17 +79,7 @@ export default function App() {
     }))
   }, [])
 
-  const requestApproval = useCallback((data) => {
-    setApproval(data)
-  }, [])
-
-  const resolveApproval = useCallback(
-    (approved) => {
-      if (approval?.onResolve) approval.onResolve(approved)
-      setApproval(null)
-    },
-    [approval]
-  )
+  const requestApproval = useCallback(() => { }, [])
 
   const toastStyles = {
     default: 'border-white/15 bg-surface/95 text-text-primary',
@@ -85,17 +100,23 @@ export default function App() {
         prefillChat,
         chatPrefill,
         clearChatPrefill,
+        orbitMode,
+        setOrbitMode,
+        openJudgeTour: () => setShowTour(true),
       }}
     >
       <div className="h-screen flex flex-col overflow-hidden bg-bg">
         <Dashboard />
-        {approval && (
-          <ApprovalModal
-            data={approval}
-            onApprove={() => resolveApproval(true)}
-            onReject={() => resolveApproval(false)}
-          />
+        {(isBooting || shouldRenderLoadingScreen) && (
+          <LoadingScreen onComplete={handleLoadingComplete} minDisplayMs={2200} />
         )}
+        <JudgeTour
+          isOpen={showTour && !isBooting}
+          onClose={() => {
+            setShowTour(false)
+            window.localStorage.setItem('judge-tour-seen', '1')
+          }}
+        />
         {toast && (
           <div
             role="status"

@@ -1,12 +1,33 @@
-import React, { useState, useEffect } from 'react'
-import { AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 
 const TIMEOUT_SECONDS = 60
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
 
-export default function ApprovalModal({ data, onApprove, onReject }) {
+export default function ApprovalModal({
+  isOpen,
+  action,
+  tool,
+  description,
+  outcome,
+  onApprove,
+  onReject,
+}) {
   const [countdown, setCountdown] = useState(TIMEOUT_SECONDS)
+  const cardRef = useRef(null)
+  const approveRef = useRef(null)
+
+  const normalizedTool = useMemo(
+    () => (tool || '').trim().toUpperCase() || 'TOOL',
+    [tool]
+  )
 
   useEffect(() => {
+    if (!isOpen) return
+    setCountdown(TIMEOUT_SECONDS)
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return undefined
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -18,102 +39,108 @@ export default function ApprovalModal({ data, onApprove, onReject }) {
       })
     }, 1000)
     return () => clearInterval(timer)
-  }, [onReject])
+  }, [isOpen, onReject])
 
-  const pct = (countdown / TIMEOUT_SECONDS) * 100
+  useEffect(() => {
+    if (!isOpen) return undefined
+    const focusTimer = window.setTimeout(() => approveRef.current?.focus(), 0)
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onReject()
+        return
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        onApprove()
+        return
+      }
+      if (event.key !== 'Tab' || !cardRef.current) return
+
+      const focusable = Array.from(cardRef.current.querySelectorAll(FOCUSABLE))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isOpen, onApprove, onReject])
+
+  if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="absolute inset-0 bg-black/75 backdrop-blur-md" aria-hidden />
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-fade-in">
+      <div className="absolute inset-0 bg-[rgba(0,0,0,0.75)] backdrop-blur-[4px]" aria-hidden />
       <div
-        className="relative w-full max-w-lg rounded-2xl border border-warning/35 bg-surface/95 backdrop-blur-xl
-          shadow-panel overflow-hidden animate-scale-in"
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="approval-modal-title"
+        className="relative w-[90%] max-w-[480px] rounded-2xl border bg-[#1E1B2E] p-8 animate-scale-in"
+        style={{ borderColor: '#7C3AED' }}
       >
-        <div className="absolute inset-0 pointer-events-none opacity-40 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(251,191,36,0.35),transparent)]" />
+        <div className="mx-auto mb-4 h-5 w-5 rounded-full bg-[#F59E0B] animate-pulse shadow-[0_0_16px_rgba(245,158,11,0.55)]" />
+        <h2 id="approval-modal-title" className="mb-2 text-center text-[20px] font-semibold text-white">
+          Approval Required
+        </h2>
+        <p className="mb-4 text-center text-[14px] text-[#9CA3AF]">
+          The agent wants to perform the following action:
+        </p>
 
-        <div className="relative flex items-center gap-3 px-6 py-4 border-b border-white/[0.08] bg-warning/10">
-          <div className="w-11 h-11 rounded-xl bg-warning/20 border border-warning/40 flex items-center justify-center flex-shrink-0 shadow-glow-sm">
-            <AlertTriangle size={22} className="text-warning" />
-          </div>
-          <div>
-            <h2 className="font-bold text-text-primary text-base tracking-tight">Human Approval Required</h2>
-            <p className="text-xs text-text-muted mt-0.5">The agent wants to perform a destructive action</p>
-          </div>
+        <div className="rounded-xl bg-[#0D0D0D] p-4">
+          <span className="inline-flex rounded px-2 py-[2px] text-[11px] font-bold bg-[#4C1D95] text-[#A78BFA]">
+            {normalizedTool}
+          </span>
+          <p className="mt-2 text-[15px] font-medium text-white">
+            {action || description || 'No action description provided'}
+          </p>
+          <p className="mt-1 text-[13px] text-[#9CA3AF]">
+            {outcome || 'No expected outcome provided'}
+          </p>
         </div>
 
-        <div className="relative px-6 py-5 space-y-4">
-          <div>
-            <p className="text-xs text-text-muted uppercase tracking-wider mb-1.5">Requested Action</p>
-            <div className="bg-surface-2/90 rounded-xl p-4 border border-white/[0.08] transition-shadow duration-300 hover:shadow-md">
-              <p className="text-sm text-text-primary font-medium leading-relaxed">
-                {data?.action || 'Close GitHub issue #142 and archive related Jira ticket BE-891'}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <DetailItem label="Tool" value={data?.tool || 'GitHub + Jira'} />
-            <DetailItem label="Expected Outcome" value={data?.outcome || 'Issue closed, ticket archived'} />
-          </div>
-
-          <div className="flex items-start gap-3 p-3.5 rounded-xl bg-error/10 border border-error/30">
-            <AlertTriangle size={14} className="text-error flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-error leading-relaxed">
-              This action <strong>cannot be undone</strong>. Review carefully before approving.
-            </p>
-          </div>
-        </div>
-
-        <div className="relative px-6 pb-2">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="flex items-center gap-1.5 text-xs text-text-muted">
-              <Clock size={11} className="opacity-80" />
-              Auto-reject in
-            </span>
-            <span className={`text-xs font-mono font-bold tabular-nums transition-colors duration-300 ${countdown <= 10 ? 'text-error scale-110' : 'text-warning'}`}>
-              {countdown}s
-            </span>
-          </div>
-          <div className="h-1.5 bg-surface-2 rounded-full overflow-hidden border border-white/[0.06]">
-            <div
-              className={`h-full rounded-full transition-[width] duration-1000 ease-linear ${countdown <= 10 ? 'bg-error shadow-[0_0_12px_rgba(248,113,113,0.5)]' : 'bg-warning shadow-[0_0_12px_rgba(251,191,36,0.35)]'}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="relative flex gap-3 px-6 py-4 border-t border-white/[0.08] bg-black/20">
+        <div className="mt-5 flex items-center gap-3">
           <button
             type="button"
             onClick={onReject}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-              bg-surface-2 border border-white/[0.1] text-text-primary text-sm font-semibold
-              hover:bg-red-950/30 hover:border-error/40 hover:text-error transition-all duration-300 hover:-translate-y-0.5 active:scale-[0.98]"
+            className="flex-1 rounded-[10px] border px-7 py-3 text-[14px] font-medium text-[#9CA3AF] transition-all duration-200 hover:text-[#EF4444] hover:border-[#EF4444]"
+            style={{ borderColor: '#374151', background: 'transparent' }}
           >
-            <XCircle size={16} />
             Reject
           </button>
           <button
+            ref={approveRef}
             type="button"
             onClick={onApprove}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-              bg-emerald-500/15 border border-success/45 text-success text-sm font-semibold
-              hover:bg-emerald-500/25 hover:shadow-[0_0_24px_-6px_rgba(52,211,153,0.45)] transition-all duration-300 hover:-translate-y-0.5 active:scale-[0.98]"
+            className="flex-1 rounded-[10px] px-7 py-3 text-[14px] font-medium text-white transition-all duration-200"
+            style={{ background: '#7C3AED' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#6D28D9'
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(124,58,237,0.4)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#7C3AED'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
           >
-            <CheckCircle size={16} />
             Approve
           </button>
         </div>
-      </div>
-    </div>
-  )
-}
 
-function DetailItem({ label, value }) {
-  return (
-    <div className="bg-surface-2/80 rounded-xl p-3 border border-white/[0.08] transition-all duration-300 hover:border-accent/25">
-      <p className="text-xs text-text-muted uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-sm text-text-primary font-mono leading-snug">{value}</p>
+        <div className={`mt-3 text-center text-[12px] ${countdown <= 10 ? 'text-[#EF4444]' : 'text-[#6B7280]'}`}>
+          Auto-rejecting in {countdown}s
+        </div>
+      </div>
     </div>
   )
 }

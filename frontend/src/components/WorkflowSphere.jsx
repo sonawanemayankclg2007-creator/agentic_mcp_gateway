@@ -535,7 +535,7 @@ export default function WorkflowSphere({ interactive = false, quality = 'high' }
     >
       <Canvas
         key={quality}
-        camera={{ position: [0, 0.12, high ? 4.05 : 4.35], fov: high ? 32 : 36 }}
+        camera={{ position: [0, 0.12, high ? 8.5 : 9.0], fov: high ? 32 : 36 }}
         dpr={dpr}
         gl={{
           alpha: true,

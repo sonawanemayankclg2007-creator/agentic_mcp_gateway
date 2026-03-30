@@ -18,6 +18,7 @@ import ReactFlow, {
   NodeToolbar,
   useReactFlow,
   useNodeId,
+  useStore,
   applyNodeChanges,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -54,6 +55,7 @@ const STATUS_DOT = {
 
 function AgentNode({ data, selected }) {
   const nodeId = useNodeId()
+  const viewportZoom = useStore((s) => s.transform?.[2] ?? 1)
   const { agentState } = useContext(AppContext)
   const { dagEdges, workflowOutput, running } = agentState
   const isTerminal = !dagEdges.some((e) => e.source === nodeId)
@@ -61,6 +63,7 @@ function AgentNode({ data, selected }) {
 
   const Icon = TOOL_ICONS[data.tool] || Cpu
   const status = data.status || 'pending'
+  const flyVisible = true
 
   return (
     <>
@@ -71,7 +74,7 @@ function AgentNode({ data, selected }) {
         align="start"
         className="!bg-transparent !border-none !shadow-none !p-0"
       >
-        <ModuleOutputCard output={workflowOutput} />
+        <ModuleOutputCard output={workflowOutput} zoom={viewportZoom} />
       </NodeToolbar>
       <div
         className={`rounded-xl border-2 px-4 py-3 min-w-[160px] transition-all duration-500 ease-out cursor-pointer
@@ -79,6 +82,10 @@ function AgentNode({ data, selected }) {
         ${STATUS_STYLES[status]}
         ${selected ? 'ring-2 ring-accent-light ring-offset-2 ring-offset-[#08070f] scale-[1.02]' : ''}
       `}
+        style={{
+          opacity: 1,
+          transform: 'scale(1)',
+        }}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent !border-none !w-2.5 !h-2.5 !-left-0.5" />
 
@@ -118,7 +125,10 @@ const DAGView = forwardRef(function DAGView(
 ) {
   const { agentState, setAgentState } = useContext(AppContext)
   const [selectedNode, setSelectedNode] = useState(null)
+  const [displayNodes, setDisplayNodes] = useState([])
+  const [edgeReveal, setEdgeReveal] = useState(false)
   const apiRef = useRef(null)
+  const shellRef = useRef(null)
 
   const { dagNodes, dagEdges, running, workflowId } = agentState
 
@@ -137,9 +147,15 @@ const DAGView = forwardRef(function DAGView(
       dagEdges.map((e) => ({
         ...e,
         animated: running,
-        style: { stroke: '#8B5CF6', strokeWidth: 2 },
+        style: {
+          stroke: '#8B5CF6',
+          strokeWidth: 2,
+          strokeDasharray: edgeReveal ? 0 : 999,
+          strokeDashoffset: edgeReveal ? 0 : 999,
+        },
+        className: edgeReveal ? 'dag-edge-reveal' : '',
       })),
-    [dagEdges, running]
+    [dagEdges, running, edgeReveal]
   )
 
   const onFlowInit = useCallback((instance) => {
@@ -160,6 +176,7 @@ const DAGView = forwardRef(function DAGView(
 
   const isEmpty = dagNodes.length === 0
   const sphereInteractive = isEmpty || orbitMode
+  const showDag = dagNodes.length > 0
 
   useEffect(() => {
     if (isEmpty) onOrbitModeChange?.(false)
@@ -169,15 +186,23 @@ const DAGView = forwardRef(function DAGView(
     if (orbitMode) setSelectedNode(null)
   }, [orbitMode])
 
+  useEffect(() => {
+    setDisplayNodes(dagNodes)
+    setEdgeReveal(dagNodes.length > 0)
+  }, [dagNodes])
+
   return (
     <div
+      ref={shellRef}
       className="h-full w-full min-h-0 flex-1 relative overflow-hidden rounded-2xl border border-white/[0.08]
         bg-[#0a0912]/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm
         ring-1 ring-inset ring-accent/[0.07]"
     >
-      <CanvasErrorBoundary>
-        <WorkflowSphere interactive={sphereInteractive} quality={gfxQuality} />
-      </CanvasErrorBoundary>
+      <div className="absolute inset-0 z-0 orb-shell opacity-100">
+        <CanvasErrorBoundary>
+          <WorkflowSphere interactive={sphereInteractive} quality={gfxQuality} />
+        </CanvasErrorBoundary>
+      </div>
       <div
         className="pointer-events-none absolute inset-0 z-[1] rounded-2xl bg-gradient-to-b from-[#0a0912]/75 via-transparent to-[#0a0912]/90"
       />
@@ -187,13 +212,13 @@ const DAGView = forwardRef(function DAGView(
       <div
         className={`relative z-10 h-full min-h-0 w-full ${sphereInteractive ? 'pointer-events-none' : ''}`}
       >
-        {isEmpty ? (
+        {!showDag ? (
           <EmptyState />
         ) : (
           <ReactFlow
             key={workflowId ?? 'no-workflow'}
-            className={`h-full w-full min-h-0 animate-fade-in ${orbitMode ? 'dag-reactflow-orbit' : ''}`}
-            nodes={dagNodes}
+            className={`h-full w-full min-h-0 animate-fade-in ${orbitMode ? 'dag-reactflow-orbit' : ''} ${edgeReveal ? 'dag-edges-drawing' : ''}`}
+            nodes={displayNodes}
             edges={rfEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}

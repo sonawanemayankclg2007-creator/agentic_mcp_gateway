@@ -50,6 +50,25 @@ Rules:
 - params must contain plausible values inferred from the user input.
 """
 
+HEAL_SYSTEM_PROMPT = """You are an auto-healing assistant for a software repo.
+
+Given a bug report and optional repository context, propose a high-confidence fix.
+
+Return ONLY a JSON object with this exact schema (no markdown, no code fences):
+{
+  "steps": [
+    { "step": "string", "status": "completed" }
+  ],
+  "fix": "string",
+  "pr_url": "string | null"
+}
+
+Rules:
+- steps must be 3 to 6 items; status must always be "completed" (UI uses it as progress chips).
+- fix should be actionable: include file paths, code snippets, and why the change works.
+- If repo info is missing, do not fabricate PR URLs; set pr_url to null.
+"""
+
 
 async def generate_dag(user_input: str, module: str) -> list[dict]:
     """
@@ -84,6 +103,78 @@ async def generate_dag(user_input: str, module: str) -> list[dict]:
     steps: list[dict] = json.loads(raw)
     logger.info("DAG planned", extra={"step_count": len(steps), "module": module})
     return steps
+
+
+async def generate_heal(user_input: str, repo: str | None = None, file_path: str | None = None) -> dict:
+    """
+    Calls Claude to propose an auto-heal plan and a concrete fix.
+    Returns dict: { steps: [{step,status}], fix: str, pr_url: str | None }
+    """
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    ctx = {
+        "bug": user_input,
+        "repo": (repo or "").strip(),
+        "file_path": (file_path or "").strip(),
+    }
+
+    logger.info("Calling Claude healer", extra={"repo": ctx["repo"] or None, "file_path": ctx["file_path"] or None})
+
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1800,
+        system=HEAL_SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Bug report:\n"
+                    f"{ctx['bug']}\n\n"
+                    "Optional context:\n"
+                    f"- repo: {ctx['repo'] or '(none)'}\n"
+                    f"- file_path: {ctx['file_path'] or '(none)'}\n"
+                ),
+            }
+        ],
+    )
+
+    raw = message.content[0].text.strip()
+    raw = re.sub(r"^```[a-z]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+
+    payload: dict = json.loads(raw)
+    steps = payload.get("steps") or []
+    fix = payload.get("fix") or ""
+    pr_url = payload.get("pr_url")
+
+    # Normalize/guard for UI expectations.
+    if not isinstance(steps, list):
+        steps = []
+    norm_steps = []
+    for s in steps[:6]:
+        if not isinstance(s, dict):
+            continue
+        step_txt = str(s.get("step") or "").strip()
+        if not step_txt:
+            continue
+        norm_steps.append({"step": step_txt, "status": "completed"})
+
+    if len(norm_steps) < 3:
+        norm_steps = [
+            {"step": "Reproduce and isolate the failure mode", "status": "completed"},
+            {"step": "Identify the likely root cause and affected files", "status": "completed"},
+            {"step": "Draft a minimal, safe patch and validate behavior", "status": "completed"},
+        ]
+
+    if not isinstance(fix, str):
+        fix = str(fix)
+    fix = fix.strip()
+
+    if pr_url is not None and not isinstance(pr_url, str):
+        pr_url = None
+    pr_url = (pr_url.strip() if isinstance(pr_url, str) and pr_url.strip() else None)
+
+    return {"steps": norm_steps, "fix": fix, "pr_url": pr_url}
 
 
 def steps_to_react_flow(steps: list[dict], session_id: str, module: str) -> dict:

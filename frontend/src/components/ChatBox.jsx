@@ -2,10 +2,19 @@ import React, { useState, useContext, useEffect, useRef, useLayoutEffect } from 
 import { createPortal } from 'react-dom'
 import { Play, ChevronDown, Zap, X, Timer } from 'lucide-react'
 import { AppContext } from '../App.jsx'
-import { runAgent, streamExecution } from '../services/api.js'
+import { runAgent, streamExecution, mockRunAgent, mockStreamExecution } from '../services/api.js'
 import { MODULE_KEYS, getModuleIO } from '../config/moduleIO.js'
 
 const MAX_LEN = 2000
+const USE_MOCK_APIS = String(import.meta.env.VITE_USE_MOCK || '').toLowerCase() === 'true'
+const PLACEHOLDERS = {
+  DevOps: 'Paste a GitHub issue URL or describe the bug...',
+  FinOps: 'Paste anomaly narrative, owner, or lightweight cost JSON...',
+  Pricing: 'Enter product SKU, category, or competitor price signal...',
+  Talent: 'Paste job description or role requirements...',
+  'Supply Chain': 'Describe demand signal, SKU, or upload forecast CSV...',
+  GeoSpatial: 'Enter address, coordinates, or site criteria...',
+}
 
 export default function ChatBox() {
   const {
@@ -23,10 +32,22 @@ export default function ChatBox() {
   const [runBurst, setRunBurst] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [menuStyle, setMenuStyle] = useState(null)
+  const [isInputFocused, setIsInputFocused] = useState(false)
   const moduleBtnRef = useRef(null)
+  const textareaRef = useRef(null)
 
   const { running, currentModule } = agentState
   const io = getModuleIO(currentModule)
+  const dynamicPlaceholder = PLACEHOLDERS[currentModule] || io.placeholder
+
+  const resizeTextarea = useRef(() => {})
+
+  resizeTextarea.current = () => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }
 
   useEffect(() => {
     if (!chatPrefill) return
@@ -36,6 +57,11 @@ export default function ChatBox() {
     }
     clearChatPrefill()
   }, [chatPrefill, clearChatPrefill, setAgentState])
+
+  useEffect(() => {
+    if (!io.multiline) return
+    window.requestAnimationFrame(() => resizeTextarea.current())
+  }, [input, io.multiline, currentModule, isInputFocused])
 
   useEffect(() => {
     if (!running) {
@@ -130,12 +156,23 @@ export default function ChatBox() {
       dagEdges: [],
       workflowOutput: null,
       lastRunInput: '',
+      thinkingBuffer: '',
+      thinkingDone: false,
+      lastEvent: null,
+      toolOutputs: {
+        github: { status: 'pending', result: '', error: '' },
+        jira: { status: 'pending', result: '', error: '' },
+        slack: { status: 'pending', result: '', error: '' },
+        sheets: { status: 'pending', result: '', error: '' },
+      },
     }))
 
     appendLog({ status: 'running', step: 'Planning workflow', detail: 'Claude is generating the DAG…' })
 
     try {
-      const { workflowId, nodes, edges } = await runAgent({ input, module: currentModule })
+      const runner = USE_MOCK_APIS ? mockRunAgent : runAgent
+      const streamer = USE_MOCK_APIS ? mockStreamExecution : streamExecution
+      const { workflowId, nodes, edges } = await runner({ input, module: currentModule })
 
       setAgentState((prev) => ({
         ...prev,
@@ -146,19 +183,94 @@ export default function ChatBox() {
 
       appendLog({ status: 'done', step: 'DAG generated', detail: `${nodes.length} steps planned` })
 
-      for await (const event of streamExecution(workflowId, nodes, {
-        module: currentModule,
-        inputText: input.trim(),
-      })) {
+      const stream = USE_MOCK_APIS
+        ? streamer(nodes, { module: currentModule, inputText: input.trim() })
+        : streamer(workflowId, nodes, { module: currentModule, inputText: input.trim() })
+
+      for await (const event of stream) {
+        setAgentState((prev) => ({ ...prev, lastEvent: event }))
         if (event.type === 'step_start') {
           updateDagNode(event.node_id, 'running')
           appendLog({ status: 'running', step: event.step, detail: event.detail })
+          const node = nodes.find((n) => n.id === event.node_id)
+          const toolId = node?.data?.tool
+          if (toolId && ['github', 'jira', 'slack', 'sheets'].includes(toolId)) {
+            setAgentState((prev) => ({
+              ...prev,
+              toolOutputs: {
+                ...prev.toolOutputs,
+                [toolId]: {
+                  ...(prev.toolOutputs?.[toolId] || {}),
+                  status: 'running',
+                  error: '',
+                },
+              },
+            }))
+          }
         } else if (event.type === 'step_done') {
           updateDagNode(event.node_id, 'done')
           appendLog({ status: 'done', step: event.step, detail: event.detail })
+          const node = nodes.find((n) => n.id === event.node_id)
+          const toolId = node?.data?.tool
+          if (toolId && ['github', 'jira', 'slack', 'sheets'].includes(toolId)) {
+            setAgentState((prev) => ({
+              ...prev,
+              toolOutputs: {
+                ...prev.toolOutputs,
+                [toolId]: {
+                  ...(prev.toolOutputs?.[toolId] || {}),
+                  status: 'done',
+                  result: event.detail || 'Completed successfully',
+                  error: '',
+                },
+              },
+            }))
+          }
         } else if (event.type === 'step_failed') {
           updateDagNode(event.node_id, 'failed')
           appendLog({ status: 'failed', step: event.step, detail: event.detail })
+          const node = nodes.find((n) => n.id === event.node_id)
+          const toolId = node?.data?.tool
+          if (toolId && ['github', 'jira', 'slack', 'sheets'].includes(toolId)) {
+            setAgentState((prev) => ({
+              ...prev,
+              toolOutputs: {
+                ...prev.toolOutputs,
+                [toolId]: {
+                  ...(prev.toolOutputs?.[toolId] || {}),
+                  status: 'failed',
+                  error: event.detail || 'Step failed',
+                },
+              },
+            }))
+          }
+        } else if (event.type === 'thinking') {
+          setAgentState((prev) => ({
+            ...prev,
+            thinkingBuffer: `${prev.thinkingBuffer || ''}${event.text || ''}`,
+          }))
+        } else if (event.type === 'tool_done') {
+          const toolId = (event.tool || '').toLowerCase()
+          if (['github', 'jira', 'slack', 'sheets'].includes(toolId)) {
+            setAgentState((prev) => ({
+              ...prev,
+              toolOutputs: {
+                ...prev.toolOutputs,
+                [toolId]: {
+                  ...(prev.toolOutputs?.[toolId] || {}),
+                  status: event.status === 'failed' ? 'failed' : 'done',
+                  result: event.result || prev.toolOutputs?.[toolId]?.result || '',
+                  error: event.error || '',
+                },
+              },
+            }))
+          }
+        } else if (event.type === 'approval_required') {
+          appendLog({
+            status: 'running',
+            step: 'Approval required',
+            detail: `${event.tool || 'Tool'} · ${event.action || event.description || 'Agent requested an action'}${event.outcome ? `\nOutcome: ${event.outcome}` : ''}`,
+          })
         } else if (event.type === 'done') {
           appendLog({ status: 'done', step: '✓ All steps complete', detail: event.summary })
           setAgentState((prev) => ({
@@ -167,6 +279,7 @@ export default function ChatBox() {
             stats: { ...prev.stats, handled: prev.stats.handled + 1 },
             workflowOutput: event.output ?? null,
             lastRunInput: input.trim().slice(0, MAX_LEN),
+            thinkingDone: true,
           }))
           setRunBurst(true)
           window.setTimeout(() => setRunBurst(false), 600)
@@ -183,7 +296,7 @@ export default function ChatBox() {
   }
 
   const handleKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       handleRun()
     }
@@ -239,6 +352,7 @@ export default function ChatBox() {
       <div className="relative flex flex-wrap items-center gap-3">
         <div className="relative flex-shrink-0 z-10">
           <button
+            data-tour="module-selector"
             ref={moduleBtnRef}
             type="button"
             aria-expanded={moduleOpen}
@@ -259,19 +373,29 @@ export default function ChatBox() {
         </div>
 
         <div
+          data-tour="input-box"
           className={`relative flex-1 min-w-[200px] rounded-xl border bg-surface-2/80 transition-all duration-300 ${io.shellClass}`}
         >
           {io.multiline ? (
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value.slice(0, MAX_LEN))}
+              onInput={() => resizeTextarea.current()}
               onKeyDown={handleKey}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
               disabled={running}
-              placeholder={io.placeholder}
-              rows={io.minRows ?? 4}
-              className={`w-full resize-y min-h-[4.5rem] max-h-48 px-4 py-2.5 pr-10 rounded-xl bg-transparent border-0
+              placeholder={dynamicPlaceholder}
+              rows={2}
+              className={`w-full resize-none px-4 py-2.5 pr-10 rounded-xl bg-transparent border-0
                 text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:ring-0
-                disabled:opacity-50 disabled:cursor-not-allowed ${io.fieldClass}`}
+                disabled:opacity-50 disabled:cursor-not-allowed transition-[height,box-shadow] duration-200 ease-in-out ${io.fieldClass}`}
+              style={{
+                minHeight: '56px',
+                height: isInputFocused || input.trim() ? '130px' : '56px',
+                boxShadow: isInputFocused ? '0 0 0 2px rgba(124,58,237,0.4)' : 'none',
+              }}
             />
           ) : (
             <input
@@ -280,7 +404,7 @@ export default function ChatBox() {
               onChange={(e) => setInput(e.target.value.slice(0, MAX_LEN))}
               onKeyDown={handleKey}
               disabled={running}
-              placeholder={io.placeholder}
+              placeholder={dynamicPlaceholder}
               className={`w-full px-4 py-2.5 pr-10 rounded-xl bg-transparent border-0
                 text-text-primary text-sm placeholder:text-text-muted/70
                 focus:outline-none focus:ring-0
@@ -311,6 +435,7 @@ export default function ChatBox() {
             </span>
           )}
           <button
+            data-tour="run-agent"
             type="button"
             onClick={handleRun}
             disabled={running || !input.trim()}
